@@ -1,134 +1,212 @@
-# Proyecto EPAI SISTEMA
+# EPAI - Entorno Personal de Aprendizaje Inteligente
 
-EPAI (Entorno Personal de Aprendizaje Inteligente) es una plataforma integral diseñada para apoyar la creación, personalización y actualización de entornos de aprendizaje. Este sistema interactúa de manera personalizada con docentes y estudiantes, ofreciendo recomendaciones inteligentes y adaptativas que facilitan la mejora continua de competencias.
+EPAI es una aplicación de escritorio que permite a docentes y estudiantes crear, personalizar y gestionar sus Entornos Personales de Aprendizaje (PLE). El sistema integra análisis inteligente del historial de navegación de Chrome mediante técnicas de NLP para generar recomendaciones adaptativas y facilitar la mejora continua de competencias.
 
-Módulo de Seguimiento y Retroalimentación: El sistema monitorea las interacciones de los usuarios y recolecta calificaciones para ajustar las recomendaciones futuras. Incluye la función de calificación y comentario sobre la calidad de los recursos y cursos ofrecidos.
+## Arquitectura
 
-## Descripción
+La aplicación utiliza una arquitectura híbrida:
 
-El sistema EPAI permite a los usuarios (docentes y estudiantes) configurar y enriquecer su entorno de aprendizaje mediante recomendaciones de cursos, herramientas, recursos y contactos. Utiliza algoritmos de recomendación y filtros personalizados para mejorar la pertinencia de los recursos sugeridos, adaptándose a los perfiles de accesibilidad y necesidades específicas de cada usuario.
+```
+┌─────────────────┐       HTTP        ┌─────────────────┐
+│   PyQt5 GUI     │ ◄──────────────►  │  Flask Backend   │
+│  (hilo principal)│   localhost:5000  │  (hilo separado) │
+└────────┬────────┘                   └────────┬─────────┘
+         │                                     │
+         │                            ┌────────┴─────────┐
+         │                            │   SQLite (local)  │
+         │                            └────────┬─────────┘
+         │                                     │
+         └──────────────┬──────────────────────┘
+                        │
+              ┌─────────┴──────────┐
+              │  UniNova API       │
+              │  (autenticación +  │
+              │   sincronización)  │
+              └────────────────────┘
+```
 
-### Funcionalidades
+## Funcionalidades
 
-- **Crear Usuario:** Permite registrar un nuevo usuario, verificando si el nombre de usuario ya existe.
-- **Manejo de Errores:** Responde con códigos de estado y mensajes adecuados para errores comunes, como la duplicación de nombres de usuario.
-- **Interfaz de usuario:** Brinda una interfaz gráfica para el login y vista de Dashboard de EPAI.
-- **Chrome Integration:** Extrae historial de navegación de Chrome y genera keywords usando NLP avanzado.
-- **PLE Management:** Gestión completa de entornos de aprendizaje personalizados.
-- **API Synchronization:** Sincronización automática de datos con servidor remoto mediante POST requests.
+### Autenticación
+- Inicio de sesión externo a través de la plataforma UniNova (Drupal)
+- Extracción automática del perfil de usuario
+- Registro local con hash de contraseñas (bcrypt)
+
+### Gestión de PLE
+- Visualización de PLEs asignados al usuario (mosaico/lista)
+- Configuración de preferencias por PLE (almacenamiento local y remoto)
+- Navegación entre secciones: Inicio, Preferencias, Cambiar PLE
+
+### Integración con Chrome
+- Detección automática de perfiles de Chrome (Windows, macOS, Linux)
+- Extracción del historial de navegación (lectura directa de SQLite)
+- Análisis de avatares de perfil (local y en la nube)
+
+### Extracción de Keywords (NLP)
+El sistema emplea 4 métodos de extracción ejecutados en paralelo:
+
+| Método | Tipo | Descripción |
+|--------|------|-------------|
+| **RAKE** | Estadístico | Rapid Automatic Keyword Extraction |
+| **KeyBERT** | Transformers | Embeddings semánticos con sentence-transformers |
+| **YAKE** | Estadístico | Yet Another Keyword Extractor |
+| **spaCy** | Lingüístico | Noun chunks + Named Entity Recognition |
+
+- Soporte multilingüe: español, inglés y portugués
+- Análisis de frecuencia y relevancia de keywords
+- Procesamiento no bloqueante con threads Qt
+
+### Sincronización API
+- Envío de datos de seguimiento a `uninovadeplan-ws.javali.pt/tracked-data-batch`
+- Manejo seguro de threads con Qt signals/slots
+- Feedback visual con overlays de progreso y batch IDs
+
+## Estructura del Proyecto
+
+```
+├── main.py                          # Punto de entrada de la aplicación
+├── requirements.txt                 # Dependencias de Python
+├── config/
+│   ├── config.py                    # Configuración (DB, API, rutas, autenticación)
+│   └── preferenciasPorPLE/          # Preferencias locales por usuario y PLE
+├── app/                             # Backend Flask
+│   ├── __init__.py                  # Factory de la app Flask
+│   ├── database.py                  # Inicialización de SQLAlchemy
+│   ├── models.py                    # Modelos: User, Role, Permission, WebTracking, WebHistory
+│   ├── auth/
+│   │   ├── login.py                 # Autenticación contra UniNova
+│   │   └── signup.py                # Registro de usuarios locales
+│   ├── chrome/
+│   │   ├── routes.py                # Endpoints: /chrome/profiles, /chrome/keywords/<profile>
+│   │   └── service.py              # Extracción de historial y keywords con NLP
+│   └── utils/
+│       └── utils.py                 # Funciones utilitarias
+├── qt_views/                        # Interfaz gráfica PyQt5
+│   ├── login_interface.py           # Ventana de inicio de sesión
+│   ├── DashboardWindow.py           # Ventana principal del dashboard
+│   ├── ProfileWindow.py             # Selección de perfil de Chrome
+│   ├── dashboard.py                 # Contenido dinámico del dashboard
+│   ├── global_state.py              # Estado global de la aplicación
+│   ├── components/
+│   │   ├── Header.py                # Barra superior con logo, avatar y logout
+│   │   └── Sidebar.py              # Menú lateral con navegación y lista de PLEs
+│   └── ple/
+│       ├── PLEView.py               # Interfaz principal de gestión de PLE
+│       ├── SitesKeywordsSyncWidget.py  # Extracción de keywords y sincronización
+│       └── SyncSummaryWidget.py     # Resumen de resultados de sincronización
+├── services/
+│   ├── api_service.py               # Cliente HTTP para la API de UniNova
+│   ├── history_service_1.py         # Análisis de historial de Chrome (v1)
+│   └── history_service_4.py         # Análisis de historial de Chrome (v4)
+├── assets/                          # Recursos estáticos (logos, imágenes)
+├── Documentation/                   # Documentación de builds y despliegue
+├── build_mac.py                     # Script de build para macOS (.app/.dmg)
+├── build_exe_fixed.py               # Script de build para Windows (.exe)
+└── EPA_Dashboard.spec               # Spec de PyInstaller para macOS
+```
 
 ## Requisitos
 
-- Python 3.x
-- Flask
-- SQLAlchemy
-- Flask-Migrate
-- QT5
-- bcrypt
-- scapy
-- requests
+- Python 3.9+
+- Google Chrome (para la funcionalidad de extracción de historial)
 
 ## Instalación
 
 ### 1. Clonar el repositorio
 
-#### Repositorio principal
-```
-git clone https://github.com/manuelhuertasespinoza/EPAI-SISTEMA.git
-cd EPAI-SISTEMA
-```
-#### Cambiar de rama (de ser necesario únicamente)
-
-```
-git checkout login
+```bash
+git clone https://github.com/danielmares32/EPAIUAA.git
+cd EPAIUAA
 ```
 
 ### 2. Crear el entorno virtual
 
-```
+```bash
 python -m venv venv
-source venv/bin/activate  # En Linux/macOS
-venv\Scripts\activate     # En Windows
+source venv/bin/activate      # Linux/macOS
+venv\Scripts\activate         # Windows
 ```
 
 ### 3. Instalar dependencias
 
-```
+```bash
 pip install -r requirements.txt
 ```
 
-### 4. Ejecución del servicio
+### 4. Descargar modelo de spaCy
 
+```bash
+python -m spacy download es_core_news_sm
 ```
+
+### 5. Configurar token de acceso
+
+Crear un archivo `secret.txt` en la raíz del proyecto con el token de la API, o definir la variable de entorno:
+
+```bash
+export API_ACCESS_TOKEN="tu_token_aquí"
+```
+
+### 6. Ejecutar la aplicación
+
+```bash
 python main.py
 ```
 
-#### 4.1 Ejecución del servicio en ciertos sistemas operativos con niveles de usuarios
+> En Linux puede ser necesario ejecutar con `sudo` para acceder a ciertos recursos del sistema.
 
-En Algunos sistemas operativos como Linux, existe manejo de niveles y de ejecución restringida para ciertas herramientas según lo que realicen, en este caso, es necesario en estos tipos de sistemas ejecutar el aplicativo como super usuario de la siguiente manera:
+## API Endpoints (Flask local)
 
-```
-sudo python main.py
-```
+| Método | Endpoint | Descripción |
+|--------|----------|-------------|
+| `POST` | `/signup` | Registro de usuario local |
+| `POST` | `/auth/login` | Autenticación contra UniNova |
+| `GET` | `/chrome/profiles` | Listar perfiles de Chrome disponibles |
+| `GET` | `/chrome/keywords/<profile>` | Extraer keywords de un perfil |
 
-### 5. CURLS
+### Ejemplos con cURL
 
-#### Creación de usuario
-
-```
-curl --location 'http://127.0.0.1:5000/signup' \
---header 'Content-Type: application/json' \
---data-raw '{
-    "nombre": "name",
-    "apellido": "lastname",
-    "usuario": "user",
-    "contrasena": "password"
-}'
+**Registro de usuario:**
+```bash
+curl -X POST http://127.0.0.1:5000/signup \
+  -H 'Content-Type: application/json' \
+  -d '{"nombre": "Juan", "apellido": "Pérez", "usuario": "jperez", "contrasena": "password123"}'
 ```
 
-#### Verificación de usuario
-
-```
-curl --location 'http://127.0.0.1:5000/login' \
---header 'Content-Type: application/json' \
---data-raw '{
-    "usuario": "user",
-    "contrasena": "password"
-}'
+**Listar perfiles de Chrome:**
+```bash
+curl http://127.0.0.1:5000/chrome/profiles
 ```
 
-#### Verificar perfiles de usuario de Google Chrome
-
-```
-curl --location 'http://127.0.0.1:5000/chrome/profiles'
-```
-
-#### Extraer keywords de Chrome por perfil
-
-```
-curl --location 'http://127.0.0.1:5000/chrome/keywords/Default'
+**Extraer keywords:**
+```bash
+curl http://127.0.0.1:5000/chrome/keywords/Default
 ```
 
-## Características Avanzadas
+## Stack Tecnológico
 
-### Integración con Chrome
-- **Extracción de historial:** Acceso directo a la base de datos de Chrome
-- **Análisis NLP:** Generación de keywords usando RAKE, KeyBERT, YAKE y spaCy
-- **Soporte multiplataforma:** Windows, macOS y Linux
-- **Procesamiento en background:** Interfaz no bloqueante con threads Qt
+| Categoría | Tecnologías |
+|-----------|-------------|
+| **Backend** | Flask 3.1, SQLAlchemy 2.0, Flask-SQLAlchemy |
+| **Frontend** | PyQt5 5.15 |
+| **NLP** | spaCy 3.8, KeyBERT 0.9, RAKE-NLTK, YAKE 0.6 |
+| **ML/DL** | PyTorch 2.7, Transformers 4.53, sentence-transformers 5.0, scikit-learn 1.7 |
+| **Seguridad** | bcrypt 4.3 |
+| **Web Scraping** | Selenium 4.34, BeautifulSoup4, Scrapy 2.12 |
+| **Red** | Scapy 2.6 |
 
-### Sincronización API
-- **Endpoint:** `https://uninovadeplan-ws.javali.pt/tracked-data-batch`
-- **Formato:** JSON con estructura completa de tracked data
-- **Threading seguro:** Manejo apropiado de Qt signals/slots
-- **Feedback visual:** Overlays de progreso y confirmación con batch IDs
+## Soporte Multiplataforma
 
-### 6. Anexo
+| Sistema | Directorio de datos | Build |
+|---------|-------------------|-------|
+| **Windows** | `%APPDATA%/EPA Dashboard` | `python build_exe_fixed.py` |
+| **macOS** | `~/Library/Application Support/EPA Dashboard` | `python build_mac.py` |
+| **Linux** | `~/.config/EPA Dashboard` | — |
 
-#### Login
+## Capturas de Pantalla
 
-![Login](/assets/preview_login.png)
+### Login
+![Login](assets/preview_login.png)
 
-#### Dashboard
-
-![Dashboard](/assets/preview_dashboard.png)
+### Dashboard
+![Dashboard](assets/preview_dashboard.png)
