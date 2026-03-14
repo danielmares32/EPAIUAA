@@ -1,0 +1,38 @@
+# Core web framework
+Flask==3.1.1
+SQLAlchemy==2.0.41
+Flask-SQLAlchemy==3.1.1
+
+# Security & encryption
+bcrypt==4.3.0
+
+# GUI framework
+PyQt5==5.15.11
+
+# HTTP requests & web scraping
+requests==2.32.4
+beautifulsoup4==4.13.4
+scrapy==2.12.0
+
+# Browser automation
+selenium==4.34.2
+webdriver-manager==4.0.2
+
+# Network analysis
+scapy==2.6.1
+
+# Natural Language Processing
+spacy==3.8.7
+rake-nltk==1.0.6
+keybert==0.9.0
+yake==0.6.0
+
+# ML & data science dependencies
+scikit-learn==1.7.1
+sentence-transformers==5.0.0
+transformers==4.53.3
+torch==2.7.1
+numpy==2.3.2
+
+# NLP data dependencies
+nltk==3.9.1
