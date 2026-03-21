@@ -12,6 +12,15 @@ try:
 except NameError:
     BASE_DIR = os.path.abspath('.')
 
+# Validate BASE_DIR by checking for a known project file.
+# GitHub Actions checkout can place the repo one level deeper.
+if not os.path.isfile(os.path.join(BASE_DIR, 'main.py')):
+    for entry in os.listdir(BASE_DIR):
+        candidate = os.path.join(BASE_DIR, entry)
+        if os.path.isdir(candidate) and os.path.isfile(os.path.join(candidate, 'main.py')):
+            BASE_DIR = candidate
+            break
+
 print(f"[SPEC] BASE_DIR = {BASE_DIR}")
 print(f"[SPEC] Contents: {os.listdir(BASE_DIR)}")
 
