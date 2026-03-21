@@ -28,25 +28,34 @@ def rel(path):
     """Resolve a path relative to the project root."""
     return os.path.join(BASE_DIR, path)
 
-# Find site-packages for spaCy models
+# Find site-packages directory
 site_packages = None
 try:
     candidates = site.getsitepackages() + [site.getusersitepackages()]
 except Exception:
     candidates = []
+# Also add Lib/site-packages under each candidate (Windows Python root case)
+expanded = []
 for sp in candidates:
-    if os.path.isdir(sp):
+    expanded.append(sp)
+    expanded.append(os.path.join(sp, 'Lib', 'site-packages'))
+    expanded.append(os.path.join(sp, 'lib', f'python{sys.version_info.major}.{sys.version_info.minor}', 'site-packages'))
+# Add local venv paths
+for venv_name in ['.venv', 'venv']:
+    if sys.platform == 'win32':
+        expanded.append(os.path.join(BASE_DIR, venv_name, 'Lib', 'site-packages'))
+    else:
+        expanded.append(os.path.join(BASE_DIR, venv_name, 'lib', f'python{sys.version_info.major}.{sys.version_info.minor}', 'site-packages'))
+# Pick the first one that actually contains a known package (yake)
+for sp in expanded:
+    if os.path.isdir(sp) and os.path.isdir(os.path.join(sp, 'yake')):
         site_packages = sp
         break
-# Fallback: look for a local venv or .venv
-if not site_packages or not os.path.isdir(site_packages):
-    for venv_name in ['.venv', 'venv']:
-        if sys.platform == 'win32':
-            venv_sp = os.path.join(BASE_DIR, venv_name, 'Lib', 'site-packages')
-        else:
-            venv_sp = os.path.join(BASE_DIR, venv_name, 'lib', f'python{sys.version_info.major}.{sys.version_info.minor}', 'site-packages')
-        if os.path.isdir(venv_sp):
-            site_packages = venv_sp
+# Fallback: first valid directory
+if not site_packages:
+    for sp in expanded:
+        if os.path.isdir(sp):
+            site_packages = sp
             break
 
 print(f"[SPEC] site_packages = {site_packages}")
@@ -85,6 +94,15 @@ if site_packages:
         datas.append((en_model, 'en_core_web_sm'))
     if os.path.isdir(es_model):
         datas.append((es_model, 'es_core_news_sm'))
+
+# Add YAKE stopwords
+if site_packages:
+    yake_stopwords = os.path.join(site_packages, 'yake', 'core', 'StopwordsList')
+    if os.path.isdir(yake_stopwords):
+        datas.append((yake_stopwords, 'yake/core/StopwordsList'))
+        print(f"[SPEC] Found YAKE stopwords: {yake_stopwords}")
+    else:
+        print(f"[SPEC] WARNING: YAKE stopwords not found at {yake_stopwords}")
 
 # Add NLTK data if found
 if nltk_data_dir:
