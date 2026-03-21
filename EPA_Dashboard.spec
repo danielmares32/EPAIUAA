@@ -6,7 +6,14 @@ from pathlib import Path
 from PyInstaller.utils.hooks import collect_all
 
 # Base directory (where this .spec file lives)
-BASE_DIR = os.path.abspath(os.path.dirname(SPECPATH)) if 'SPECPATH' in dir() else os.path.abspath('.')
+# SPECPATH is always set by PyInstaller when running a .spec file
+try:
+    BASE_DIR = os.path.abspath(os.path.dirname(SPECPATH))
+except NameError:
+    BASE_DIR = os.path.abspath('.')
+
+print(f"[SPEC] BASE_DIR = {BASE_DIR}")
+print(f"[SPEC] Contents: {os.listdir(BASE_DIR)}")
 
 def rel(path):
     """Resolve a path relative to the project root."""
@@ -14,24 +21,40 @@ def rel(path):
 
 # Find site-packages for spaCy models
 site_packages = None
-for sp in site.getsitepackages() + [site.getusersitepackages()]:
+try:
+    candidates = site.getsitepackages() + [site.getusersitepackages()]
+except Exception:
+    candidates = []
+for sp in candidates:
     if os.path.isdir(sp):
         site_packages = sp
         break
-# Fallback: look for a local .venv
+# Fallback: look for a local venv or .venv
 if not site_packages or not os.path.isdir(site_packages):
-    venv_sp = os.path.join(BASE_DIR, '.venv', 'lib', f'python{sys.version_info.major}.{sys.version_info.minor}', 'site-packages')
-    if os.path.isdir(venv_sp):
-        site_packages = venv_sp
+    for venv_name in ['.venv', 'venv']:
+        if sys.platform == 'win32':
+            venv_sp = os.path.join(BASE_DIR, venv_name, 'Lib', 'site-packages')
+        else:
+            venv_sp = os.path.join(BASE_DIR, venv_name, 'lib', f'python{sys.version_info.major}.{sys.version_info.minor}', 'site-packages')
+        if os.path.isdir(venv_sp):
+            site_packages = venv_sp
+            break
+
+print(f"[SPEC] site_packages = {site_packages}")
 
 # Find NLTK data (check common locations)
 nltk_data_dir = None
-for candidate in [
+_nltk_candidates = [
     os.path.join(str(Path.home()), 'nltk_data'),
     os.path.join(BASE_DIR, 'nltk_data'),
-    '/usr/share/nltk_data',
-    '/usr/local/share/nltk_data',
-]:
+]
+if sys.platform == 'win32':
+    _appdata = os.getenv('APPDATA', '')
+    if _appdata:
+        _nltk_candidates.insert(0, os.path.join(_appdata, 'nltk_data'))
+else:
+    _nltk_candidates += ['/usr/share/nltk_data', '/usr/local/share/nltk_data']
+for candidate in _nltk_candidates:
     if os.path.isdir(candidate):
         nltk_data_dir = candidate
         break
