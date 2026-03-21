@@ -2,6 +2,7 @@
 
 import sys
 import os
+from typing import Optional, Union, Tuple
 import json
 import requests
 import sqlite3
@@ -102,12 +103,12 @@ def _resolver_perfil_usuario_json():
 def _prefs_key(user_id:int, env_id:int) -> str:
     return f"{int(user_id)}:{int(env_id)}"
 
-def _get_pref_for_user_env(user_id:int, env_id:int) -> dict | None:
+def _get_pref_for_user_env(user_id:int, env_id:int) -> Optional[dict]:
     prefs = _load_prefs()
     rec = prefs.get(_prefs_key(user_id, env_id))
     return rec if isinstance(rec, dict) else None
 
-def _set_pref_for_user_env(user_id:int, env_id:int, mode:str, frequency:int|None=0) -> None:
+def _set_pref_for_user_env(user_id:int, env_id:int, mode:str, frequency:Optional[int]=0) -> None:
     prefs = _load_prefs()
     prefs[_prefs_key(user_id, env_id)] = {
         "mode": mode,
@@ -117,7 +118,7 @@ def _set_pref_for_user_env(user_id:int, env_id:int, mode:str, frequency:int|None
     }
     _save_prefs(prefs)
 
-def _leer_ultimo_env_id() -> int | None:
+def _leer_ultimo_env_id() -> Optional[int]:
     """Lee 'pleseleccionado=<id>' de guardarIDPLE.txt, si existe."""
     try:
         path_txt = _resolver_guardar_id_ple()
@@ -174,7 +175,7 @@ def ensure_server_prefs(environment_id: int, user_id: int) -> dict:
     _set_pref_for_user_env(user_id, environment_id, rec["mode"], rec["frequency"])
     return rec
 
-def put_server_prefs(environment_id:int, user_id:int, mode:str, frequency:int|None=0):
+def put_server_prefs(environment_id:int, user_id:int, mode:str, frequency:Optional[int]=0):
     url = f"{API_BASE}/preferences/{int(environment_id)}"
     payload = _mode_to_flags(mode, frequency)
     try:
@@ -225,7 +226,7 @@ def _save_prefs(prefs: dict) -> None:
     with p.open("w", encoding="utf-8") as f:
         json.dump(prefs, f, ensure_ascii=False, indent=2)
 
-def _mode_to_flags(mode: str, freq: int | None) -> dict:
+def _mode_to_flags(mode: str, freq: Optional[int]) -> dict:
     freq = int(freq) if isinstance(freq, int) or (isinstance(freq, str) and str(freq).isdigit()) else 0
     flags = {
         "transmissionFrequency": freq,
@@ -244,7 +245,7 @@ def _mode_to_flags(mode: str, freq: int | None) -> dict:
         flags["noTrack"] = True
     return flags
 
-def _flags_to_mode(d: dict) -> tuple[str, int]:
+def _flags_to_mode(d: dict) -> Tuple[str, int]:
     """Devuelve (mode, transmissionFrequency) desde respuesta del server."""
     if not isinstance(d, dict):
         return ("none", 0)
@@ -409,7 +410,7 @@ class PLEView(QWidget):
 
         
 
-    def _start_realtime_tracker(self, profile_dir: str, batch_size: int | None = None, poll_seconds: int | None = None) -> bool:
+    def _start_realtime_tracker(self, profile_dir: str, batch_size: Optional[int] = None, poll_seconds: Optional[int] = None) -> bool:
         """
         Inicia el RealTimeHistoryWatcher en un hilo daemon.
         Ajusta el import al path real de tu archivo (ver bloques try/except).
@@ -480,6 +481,8 @@ class PLEView(QWidget):
                 # Si tu widget acepta env_id en el constructor
                 self.sites_keywords_window = SitesKeywordsSyncWidget(
                     self,
+                    user_id=GlobalState.user_id,
+                    ple_id=env_id,
                     env_id=env_id,
                     main_window=main_window,
                     selected_profile=GlobalState.selected_profile,

@@ -1431,11 +1431,9 @@ class SitesKeywordsSyncWidget(QMainWindow):
         # User feedback storage
         self.user_feedback = {}  # {url: {'score': float, 'comments': str}}
         
-        # API configuration - ensure these are integers
-        #self.user_id = int(user_id) if user_id else GOT_IT_ID
-        #self.ple_id = int(ple_id) if ple_id else idpleDinamico
-        self.user_id = int(GOT_IT_ID) 
-        self.ple_id = int(idpleDinamico) 
+        # API configuration - use GlobalState (set at login), fall back to file-based values
+        self.user_id = int(GlobalState.user_id) if GlobalState.user_id else GOT_IT_ID
+        self.ple_id = int(env_id) if env_id else idpleDinamico
         
         
         print(f"🔧 SitesKeywordsSyncWidget initialized with:")
