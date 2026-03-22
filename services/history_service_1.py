@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # Dependencias básicas
-import os, sys, sqlite3, time, threading, json, tempfile, shutil, platform
+import os, sys, sqlite3, time, threading, json, tempfile, shutil, platform, logging
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 import json as _json
@@ -12,7 +12,21 @@ from urllib.parse import urlparse, parse_qs, unquote
 
 # Import authentication configuration
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from config.config import get_auth_headers
+from config.config import get_auth_headers, get_data_dir
+
+# Setup file logging so we can debug even when console=False (exe mode)
+_log_dir = get_data_dir()
+_log_file = _log_dir / "history_service_rt.log"
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[
+        logging.FileHandler(str(_log_file), encoding="utf-8"),
+        logging.StreamHandler(sys.stdout),  # Also print to console if available
+    ]
+)
+_logger = logging.getLogger("history_service_1")
+_logger.info(f"Log file: {_log_file}")
 
 
 try:
@@ -276,7 +290,7 @@ def copy_history_to_temp(src_history_path):
         shutil.copy2(src_history_path, tmp_history)
     except (PermissionError, OSError) as e:
         # Chrome locks the database - try reading it directly in read-only mode
-        print(f"[WARN] copy2 failed ({e}), trying direct SQLite read-only connection")
+        _logger.warning(f"copy2 failed ({e}), trying direct SQLite read-only connection")
         shutil.rmtree(tmp_dir, ignore_errors=True)
         # Return None to signal caller to use read-only direct access
         return None, src_history_path
@@ -755,9 +769,9 @@ def _send_rt_batch_to_server(json_path: str):
             timeout=20
         )
         resp.raise_for_status()
-        print(f"[OK] Envío RT -> {BASE_URL}/tracked-data-batch (status {resp.status_code})")
+        _logger.info(f"Envío RT -> {BASE_URL}/tracked-data-batch (status {resp.status_code})")
     except Exception as e:
-        print(f"[WARN] Falló envío RT: {e}")
+        _logger.error(f"Falló envío RT: {e}", exc_info=True)
 # Escritura del lote JSON (sobrescribe)
 def write_batch_json(batch_items, user_id=None, associated_ple=None, out_path=OUTPUT_JSON_PATH):
     
@@ -801,7 +815,7 @@ class RealTimeHistoryWatcher:
         self._thread = None
         temp_state = load_state()
         if temp_state.get("pending"):
-            print(f"[INFO] Limpiando {len(temp_state['pending'])} items pendientes del estado anterior al iniciar.")
+            _logger.info(f"Limpiando {len(temp_state['pending'])} items pendientes del estado anterior al iniciar.")
             temp_state["pending"] = []
             save_state(temp_state)
         self._state = temp_state
@@ -830,15 +844,15 @@ class RealTimeHistoryWatcher:
     def _process_and_send_batch(self, batch):
         """Enrich batch items in parallel and send to server."""
         try:
-            print(f"[DEBUG] Enriqueciendo lote de {len(batch)} items en paralelo...")
+            _logger.info(f"Enriqueciendo lote de {len(batch)} items en paralelo...")
             with ThreadPoolExecutor(max_workers=3) as pool:
                 enriched = list(pool.map(self._enrich_single, batch))
             write_batch_json(enriched, user_id=self.user_id, associated_ple=self.ple_id)
-            print(f"[OK] JSON con {len(enriched)} items -> {OUTPUT_JSON_PATH}")
+            _logger.info(f"JSON con {len(enriched)} items -> {OUTPUT_JSON_PATH}")
             _send_rt_batch_to_server(OUTPUT_JSON_PATH)
-            print(f"[DEBUG] Lote enviado al servidor.")
+            _logger.info(f"Lote enviado al servidor.")
         except Exception as e:
-            print(f"[ERROR] Falló procesamiento/envío del lote: {e}")
+            _logger.error(f"Falló procesamiento/envío del lote: {e}", exc_info=True)
 
     def _read_history_db(self, history_src, func, *args):
         """Read from Chrome History DB, handling Chrome's lock."""
@@ -852,9 +866,9 @@ class RealTimeHistoryWatcher:
     def _run_loop(self):
         try:
             history_src = resolve_chrome_history_path(self.profile_dir)
-            print(f"[RT] Chrome History path: {history_src}")
+            _logger.info(f"Chrome History path: {history_src}")
         except Exception as e:
-            print(f"[ERROR] Ruta de History: {e}")
+            _logger.error(f"Ruta de History: {e}", exc_info=True)
             return
 
         # Initialize last_seen_id: set to current max so we only track NEW visits
@@ -863,15 +877,15 @@ class RealTimeHistoryWatcher:
                 self._last_seen_id = self._read_history_db(history_src, get_max_visit_id_on_snapshot)
                 self._state["last_seen_id"] = self._last_seen_id
                 save_state(self._state)
-                print(f"[RT] Initialized last_seen_id = {self._last_seen_id}")
+                _logger.info(f"Initialized last_seen_id = {self._last_seen_id}")
             except Exception as e:
-                print(f"[WARN] Init last_seen_id: {e}")
+                _logger.warning(f"Init last_seen_id: {e}", exc_info=True)
                 self._last_seen_id = 0
 
         pending = []
         send_thread = None
 
-        print(f"[RT] Watcher started. batch_size={self.batch_size}, poll={self.poll_interval}s, user_id={self.user_id}, ple_id={self.ple_id}")
+        _logger.info(f"Watcher started. batch_size={self.batch_size}, poll={self.poll_interval}s, user_id={self.user_id}, ple_id={self.ple_id}")
 
         while not self._stop.is_set():
             try:
@@ -883,7 +897,7 @@ class RealTimeHistoryWatcher:
                     self._last_seen_id = max(self._last_seen_id, max(i["visit_id"] for i in new_items))
                     self._state["last_seen_id"] = self._last_seen_id
                     pending.extend(new_items)
-                    print(f"[RT] {len(new_items)} new visits detected. Pending: {len(pending)}/{self.batch_size}")
+                    _logger.info(f"{len(new_items)} new visits detected. Pending: {len(pending)}/{self.batch_size}")
 
                     if len(pending) >= self.batch_size:
                         # Wait for previous send to finish if still running
@@ -903,24 +917,24 @@ class RealTimeHistoryWatcher:
                         try:
                             save_state(self._state)
                         except Exception as e:
-                            print(f"[ERROR] Failed to save state: {e}")
+                            _logger.error(f"Failed to save state: {e}")
                     else:
                         self._state["pending"] = pending
                         save_state(self._state)
             except Exception as e:
-                print(f"[ERROR] Iteración: {e}")
+                _logger.error(f"Iteración: {e}", exc_info=True)
 
             self._stop.wait(self.poll_interval)
 
         # Wait for any in-flight send to complete before stopping
         if send_thread and send_thread.is_alive():
-            print("[RT] Waiting for in-flight batch to finish...")
+            _logger.info("Waiting for in-flight batch to finish...")
             send_thread.join(timeout=30)
 
         self._state["last_seen_id"] = self._last_seen_id
         self._state["pending"] = pending
         save_state(self._state)
-        print(f"[RT] Watcher stopped. last_seen_id={self._last_seen_id}")
+        _logger.info(f"Watcher stopped. last_seen_id={self._last_seen_id}")
 
 if __name__ == "__main__":
     watcher = RealTimeHistoryWatcher(profile_dir=PROFILE_DIR, poll_interval=POLL_INTERVAL_SECONDS, batch_size=BATCH_SIZE)
