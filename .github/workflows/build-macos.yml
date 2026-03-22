@@ -34,30 +34,29 @@ jobs:
       - name: Build .app with PyInstaller
         run: pyinstaller EPA_Dashboard.spec
 
-      - name: Create PKG installer
+      - name: Create DMG installer
         run: |
-          # Use --component to directly package the .app bundle into /Applications
-          pkgbuild \
-            --component dist/EPA_Dashboard.app \
-            --install-location /Applications \
-            --identifier com.epai.dashboard \
-            --version 1.0.0 \
-            EPA_Dashboard.pkg
-          echo "PKG created:"
-          ls -la EPA_Dashboard.pkg
-          echo "PKG payload files:"
-          pkgutil --payload-files EPA_Dashboard.pkg | head -5
+          # Create a temporary DMG layout folder
+          mkdir -p dmg_contents
+          cp -R dist/EPA_Dashboard.app dmg_contents/
 
-      - name: Upload .app artifact
+          # Create a symbolic link to /Applications for drag-and-drop
+          ln -s /Applications dmg_contents/Applications
+
+          # Create the DMG
+          hdiutil create \
+            -volname "EPA Dashboard" \
+            -srcfolder dmg_contents \
+            -ov \
+            -format UDZO \
+            EPA_Dashboard.dmg
+
+          echo "DMG created:"
+          ls -la EPA_Dashboard.dmg
+
+      - name: Upload .dmg artifact
         uses: actions/upload-artifact@v4
         with:
-          name: EPA_Dashboard-macos-app
-          path: dist/EPA_Dashboard.app
-          retention-days: 30
-
-      - name: Upload .pkg artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: EPA_Dashboard-macos-pkg
-          path: EPA_Dashboard.pkg
+          name: EPA_Dashboard-macos-dmg
+          path: EPA_Dashboard.dmg
           retention-days: 30
