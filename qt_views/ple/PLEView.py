@@ -410,7 +410,7 @@ class PLEView(QWidget):
 
         
 
-    def _start_realtime_tracker(self, profile_dir: str, batch_size: Optional[int] = None, poll_seconds: Optional[int] = None) -> bool:
+    def _start_realtime_tracker(self, profile_dir: str, batch_size: Optional[int] = None, poll_seconds: Optional[int] = None, user_id=None, ple_id=None) -> bool:
         """
         Inicia el RealTimeHistoryWatcher en un hilo daemon.
         Ajusta el import al path real de tu archivo (ver bloques try/except).
@@ -444,6 +444,10 @@ class PLEView(QWidget):
             kwargs["batch_size"] = batch_size
         if isinstance(poll_seconds, int) and poll_seconds > 0:
             kwargs["poll_interval"] = poll_seconds
+        if user_id is not None:
+            kwargs["user_id"] = int(user_id)
+        if ple_id is not None:
+            kwargs["ple_id"] = int(ple_id)
 
         try:
             self._rt_watcher = RT(profile_dir=profile_dir, **kwargs)
@@ -1654,31 +1658,17 @@ class PLEView(QWidget):
             if not prof:
                 QMessageBox.warning(self, "Perfil", "No hay perfil de Chrome seleccionado.")
                 return
-
-            # Use the same sending path as option 3 (logout) via history_service_4
-            from qt_views.DashboardWindow import HistoryWorker
-
-            env_id_val = self.active_ple.get("environmentID") if self.active_ple else None
-            if env_id_val is not None:
-                os.environ["EPA_SELECTED_ENV_ID"] = str(env_id_val)
-
-            self._hist_worker = HistoryWorker(
+            started = self._start_realtime_tracker(
                 profile_dir=prof,
-                output_dir="chrome_exports/teacher",
+                batch_size=frequency if frequency > 0 else None,
                 user_id=GlobalState.user_id,
-                ple_id=env_id_val
+                ple_id=env_id_int
             )
-            self._hist_worker.done.connect(lambda: QMessageBox.information(
-                self, "Seguimiento",
-                f"Datos enviados correctamente al servidor.\nPerfil: {prof}"
-            ))
-            self._hist_worker.fail.connect(lambda err: QMessageBox.critical(
-                self, "Error de envío",
-                f"Error al enviar datos:\n{err}"
-            ))
-            self._hist_worker.start()
-            QMessageBox.information(self, "Seguimiento",
-                f"Enviando datos del historial de Chrome...\nPerfil: {prof}")
+            if started:
+                msg = f"Seguimiento en tiempo real ACTIVADO\nPerfil: {prof}"
+                if frequency and frequency > 0:
+                    msg += f"\nFrecuencia/Lote: {frequency}"
+                QMessageBox.information(self, "Seguimiento", msg)
             return
 
         self._stop_realtime_tracker()

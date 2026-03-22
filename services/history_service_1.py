@@ -770,9 +770,11 @@ def write_batch_json(batch_items, user_id=None, associated_ple=None, out_path=OU
 
 # Servicio de monitoreo
 class RealTimeHistoryWatcher:
-    def __init__(self, profile_dir=None, poll_interval=POLL_INTERVAL_SECONDS, batch_size=BATCH_SIZE):
+    def __init__(self, profile_dir=None, poll_interval=POLL_INTERVAL_SECONDS, batch_size=BATCH_SIZE, user_id=None, ple_id=None):
         self.profile_dir = profile_dir
         self.poll_interval = poll_interval
+        self.user_id = user_id
+        self.ple_id = ple_id
         try:
             self.batch_size = int(batch_size) if int(batch_size) > 0 else BATCH_SIZE
         except Exception:
@@ -841,7 +843,7 @@ class RealTimeHistoryWatcher:
                                     f["associatedDomains"] = ["General Knowledge"]
                                     f["associatedKeywords"] = []
                                     enriched.append(f)
-                            write_batch_json(enriched)
+                            write_batch_json(enriched, user_id=self.user_id, associated_ple=self.ple_id)
                             print(f"[OK] JSON con {len(enriched)} items -> {OUTPUT_JSON_PATH}")
                             _send_rt_batch_to_server(OUTPUT_JSON_PATH)
                             print(f"[DEBUG] Lote procesado. Actualizando estado...")
