@@ -1,0 +1,63 @@
+name: Build macOS App
+
+on:
+  workflow_dispatch:  # Manual trigger from GitHub UI
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Download spaCy models
+        run: |
+          python -m spacy download en_core_web_sm
+          python -m spacy download es_core_news_sm
+
+      - name: Download NLTK data
+        run: |
+          python -c "import nltk; nltk.download('stopwords', download_dir='./nltk_data'); nltk.download('punkt', download_dir='./nltk_data'); nltk.download('punkt_tab', download_dir='./nltk_data')"
+
+      - name: Build .app with PyInstaller
+        run: pyinstaller EPA_Dashboard.spec
+
+      - name: Create PKG installer
+        run: |
+          # Create a temporary directory structure for pkgbuild
+          mkdir -p pkg_root/Applications
+          cp -R dist/EPA_Dashboard.app pkg_root/Applications/
+
+          # Build the .pkg installer
+          pkgbuild \
+            --root pkg_root \
+            --identifier com.epai.dashboard \
+            --version 1.0.0 \
+            --install-location / \
+            EPA_Dashboard.pkg
+
+      - name: Upload .app artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: EPA_Dashboard-macos-app
+          path: dist/EPA_Dashboard.app
+          retention-days: 30
+
+      - name: Upload .pkg artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: EPA_Dashboard-macos-pkg
+          path: EPA_Dashboard.pkg
+          retention-days: 30
