@@ -813,13 +813,12 @@ class RealTimeHistoryWatcher:
             self.batch_size = BATCH_SIZE
         self._stop = threading.Event()
         self._thread = None
-        temp_state = load_state()
-        if temp_state.get("pending"):
-            _logger.info(f"Limpiando {len(temp_state['pending'])} items pendientes del estado anterior al iniciar.")
-            temp_state["pending"] = []
-            save_state(temp_state)
-        self._state = temp_state
-        self._last_seen_id = self._state.get("last_seen_id", 0)
+        # Always start fresh: reset state so _run_loop initializes last_seen_id
+        # to the current max visit ID (only tracks NEW visits from now on)
+        self._state = {"last_seen_id": 0, "pending": []}
+        save_state(self._state)
+        self._last_seen_id = 0
+        _logger.info(f"State reset. Will initialize last_seen_id on first poll.")
 
     def start(self):
         self._thread = threading.Thread(target=self._run_loop, daemon=True)
