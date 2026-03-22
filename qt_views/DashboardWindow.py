@@ -11,20 +11,28 @@ from .components.Header import Header
 from qt_views.ProfileWindow import ProfileWindow
 from qt_views.global_state import GlobalState
 from qt_views.ple.PLEView import PLEView
+from config.config import get_auth_headers
 
 class HistoryWorker(QThread):
     done = pyqtSignal()
     fail = pyqtSignal(str)
 
-    def __init__(self, profile_dir=None, output_dir=None):
+    def __init__(self, profile_dir=None, output_dir=None, user_id=None, ple_id=None):
         super().__init__()
         self.profile_dir = profile_dir
         self.output_dir = output_dir
+        self.user_id = user_id
+        self.ple_id = ple_id
 
     def run(self):
         try:
             from services.history_service_4 import run_crawler
-            run_crawler(profile_dir=self.profile_dir, output_dir=self.output_dir)
+            run_crawler(
+                profile_dir=self.profile_dir,
+                output_dir=self.output_dir,
+                user_id=self.user_id,
+                ple_id=self.ple_id
+            )
             self.done.emit()
         except Exception as e:
             self.fail.emit(str(e))
@@ -206,10 +214,11 @@ class DashboardWindow(QWidget):
                 print("[Dashboard] No user_id, skipping PLE load")
                 return
 
-            from config.config import get_auth_headers
             API_BASE = "https://uninovadeplan-ws.javali.pt"
             print(f"[Dashboard] Fetching PLEs from {API_BASE}/PLE/user/{user_id}")
-            resp = requests.get(f"{API_BASE}/PLE/user/{user_id}", headers=get_auth_headers(), timeout=10)
+            headers = get_auth_headers()
+            headers['Accept'] = 'application/json'
+            resp = requests.get(f"{API_BASE}/PLE/user/{user_id}", headers=headers, timeout=10)
             resp.raise_for_status()
             ple_data = resp.json() or []
             print(f"[Dashboard] Received {len(ple_data)} PLEs from API")
@@ -250,7 +259,9 @@ class DashboardWindow(QWidget):
             # >>> PASAR EL PERFIL SELECCIONADO <<<
             self._hist_worker = HistoryWorker(
                 profile_dir=GlobalState.current_profile_dir,
-                output_dir="chrome_exports/teacher"
+                output_dir="chrome_exports/teacher",
+                user_id=GlobalState.user_id,
+                ple_id=env_id
             )
 
             self._hist_worker.done.connect(lambda: self._finish_logout(LoginWindow))

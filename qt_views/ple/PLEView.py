@@ -1663,7 +1663,9 @@ class PLEView(QWidget):
 
             self._hist_worker = HistoryWorker(
                 profile_dir=prof,
-                output_dir="chrome_exports/teacher"
+                output_dir="chrome_exports/teacher",
+                user_id=GlobalState.user_id,
+                ple_id=env_id_val
             )
             self._hist_worker.done.connect(lambda: QMessageBox.information(
                 self, "Seguimiento",

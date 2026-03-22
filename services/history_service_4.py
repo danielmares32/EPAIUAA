@@ -971,29 +971,39 @@ print(f"[UID] DEFAULT_PLE_USER_ID: {DEFAULT_PLE_USER_ID}")
 
 #Pipeline para escribir los datos en un archivo  JSON
 class JsonWriterPipeline:
-    export_path = None     
+    export_path = None
+    override_user_id = None
+    override_ple_id = None
+
     def open_spider(self, spider):
         print("Entro a open_spider")
-        idpleDinamico = 0
-        try:
-            path = _resolver_guardar_id_ple()
-            if path:
-                with open(path, "r", encoding="utf-8") as archivo:
-                    for linea in archivo:
-                        if "=" in linea:
-                            clave, valor = linea.strip().split("=")
-                            if clave.strip() == "pleseleccionado":
-                                idpleDinamico = int(valor.strip())
-            else:
-                print("[WARN] No se encontró guardarIDPLE.txt; usando 0.")
-        except Exception as e:
-            print(f"[WARN] No se pudo leer ID PLE dinámico: {e}. Usando 0.")
-        """
-        Inicializa un contenedor para los datos cuando el spider comienza.
-        """
+
+        # Use overrides from run_crawler if provided, otherwise fall back to file-based values
+        user_id = self.override_user_id
+        if user_id is None:
+            user_id = DEFAULT_PLE_USER_ID
+
+        ple_id = self.override_ple_id
+        if ple_id is None:
+            ple_id = 0
+            try:
+                path = _resolver_guardar_id_ple()
+                if path:
+                    with open(path, "r", encoding="utf-8") as archivo:
+                        for linea in archivo:
+                            if "=" in linea:
+                                clave, valor = linea.strip().split("=")
+                                if clave.strip() == "pleseleccionado":
+                                    ple_id = int(valor.strip())
+                else:
+                    print("[WARN] No se encontró guardarIDPLE.txt; usando 0.")
+            except Exception as e:
+                print(f"[WARN] No se pudo leer ID PLE dinámico: {e}. Usando 0.")
+
+        print(f"[JsonWriterPipeline] userID={user_id}, associatedPLE={ple_id}")
         self.data = {
-            "userID": DEFAULT_PLE_USER_ID,              #  antes "userID": 1 modificado por Julio Enríquez 24-07-2025
-            "associatedPLE": idpleDinamico,    #antes "associatedPLE":1234 modificado por Julio Enríquez 24-07-2025
+            "userID": user_id,
+            "associatedPLE": ple_id,
             "trackedDataList": []
         }
 
@@ -1015,11 +1025,19 @@ class JsonWriterPipeline:
         return item
 
 # Función principal para ejecutar el extractor y el spider
-def run_crawler(profile_dir=None, output_dir=None):
+def run_crawler(profile_dir=None, output_dir=None, user_id=None, ple_id=None):
     print("Entro a run_crawler")
     export_dir = output_dir or DEFAULT_EXPORT_DIR
     os.makedirs(export_dir, exist_ok=True)
     print(f"[history_service_4] profile_dir => {profile_dir or 'Default'}")
+    print(f"[history_service_4] user_id={user_id}, ple_id={ple_id}")
+
+    # Pass IDs to the pipeline so they end up in the JSON payload
+    if user_id is not None:
+        JsonWriterPipeline.override_user_id = int(user_id)
+    if ple_id is not None:
+        JsonWriterPipeline.override_ple_id = int(ple_id)
+
     extractor = ChromeHistoryExtractor(profile_dir=profile_dir)
     history_entries = extractor.extract_history(days_back=90, max_urls=8000)
     if not history_entries:
