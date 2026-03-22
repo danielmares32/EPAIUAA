@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 # Dependencias básicas
 import os, sys, sqlite3, time, threading, json, tempfile, shutil, platform
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 import json as _json
 import requests
@@ -267,16 +268,33 @@ def resolve_chrome_history_path(profile_dir=None):
             return hist_path
     raise FileNotFoundError("No se encontró el archivo 'History'.")
 
-# Copia temporal segura
+# Copia temporal segura (handles Chrome database lock)
 def copy_history_to_temp(src_history_path):
     tmp_dir = tempfile.mkdtemp(prefix="chrome_hist_rt_")
     tmp_history = os.path.join(tmp_dir, "History.sqlite")
-    shutil.copy2(src_history_path, tmp_history)
+    try:
+        shutil.copy2(src_history_path, tmp_history)
+    except (PermissionError, OSError) as e:
+        # Chrome locks the database - try reading it directly in read-only mode
+        print(f"[WARN] copy2 failed ({e}), trying direct SQLite read-only connection")
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        # Return None to signal caller to use read-only direct access
+        return None, src_history_path
     return tmp_dir, tmp_history
 
-# Lecturas desde snapshot
+# Lecturas desde snapshot (or direct read-only access if Chrome locks the DB)
+def _connect_history(history_path):
+    """Connect to Chrome History DB, trying read-only URI mode first."""
+    try:
+        uri = f"file:{history_path}?mode=ro&nolock=1"
+        conn = sqlite3.connect(uri, uri=True, timeout=5)
+        conn.execute("PRAGMA journal_mode=WAL;")
+        return conn
+    except Exception:
+        return sqlite3.connect(history_path, timeout=5)
+
 def get_max_visit_id_on_snapshot(history_path):
-    conn = sqlite3.connect(history_path)
+    conn = _connect_history(history_path)
     try:
         cur = conn.cursor()
         cur.execute("SELECT IFNULL(MAX(id), 0) FROM visits;")
@@ -286,7 +304,7 @@ def get_max_visit_id_on_snapshot(history_path):
         conn.close()
 
 def fetch_new_visits_since(history_path, last_seen_id, limit):
-    conn = sqlite3.connect(history_path)
+    conn = _connect_history(history_path)
     try:
         cur = conn.cursor()
         cur.execute("""
@@ -798,76 +816,111 @@ class RealTimeHistoryWatcher:
         if self._thread:
             self._thread.join()
 
+    def _enrich_single(self, item):
+        """Enrich a single visit item (runs in thread pool)."""
+        try:
+            return enrich_visit(dict(item))
+        except Exception:
+            f = dict(item)
+            f["activityType"] = "Other"
+            f["associatedDomains"] = ["General Knowledge"]
+            f["associatedKeywords"] = []
+            return f
+
+    def _process_and_send_batch(self, batch):
+        """Enrich batch items in parallel and send to server."""
+        try:
+            print(f"[DEBUG] Enriqueciendo lote de {len(batch)} items en paralelo...")
+            with ThreadPoolExecutor(max_workers=3) as pool:
+                enriched = list(pool.map(self._enrich_single, batch))
+            write_batch_json(enriched, user_id=self.user_id, associated_ple=self.ple_id)
+            print(f"[OK] JSON con {len(enriched)} items -> {OUTPUT_JSON_PATH}")
+            _send_rt_batch_to_server(OUTPUT_JSON_PATH)
+            print(f"[DEBUG] Lote enviado al servidor.")
+        except Exception as e:
+            print(f"[ERROR] Falló procesamiento/envío del lote: {e}")
+
+    def _read_history_db(self, history_src, func, *args):
+        """Read from Chrome History DB, handling Chrome's lock."""
+        tmp_dir, tmp_hist = copy_history_to_temp(history_src)
+        try:
+            return func(tmp_hist, *args)
+        finally:
+            if tmp_dir is not None:
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+
     def _run_loop(self):
         try:
             history_src = resolve_chrome_history_path(self.profile_dir)
+            print(f"[RT] Chrome History path: {history_src}")
         except Exception as e:
             print(f"[ERROR] Ruta de History: {e}")
             return
 
+        # Initialize last_seen_id: set to current max so we only track NEW visits
         if not self._last_seen_id:
             try:
-                tmp_dir, tmp_hist = copy_history_to_temp(history_src)
-                try:
-                    self._last_seen_id = get_max_visit_id_on_snapshot(tmp_hist)
-                    self._state["last_seen_id"] = self._last_seen_id
-                    save_state(self._state)
-                finally:
-                    shutil.rmtree(tmp_dir, ignore_errors=True)
+                self._last_seen_id = self._read_history_db(history_src, get_max_visit_id_on_snapshot)
+                self._state["last_seen_id"] = self._last_seen_id
+                save_state(self._state)
+                print(f"[RT] Initialized last_seen_id = {self._last_seen_id}")
             except Exception as e:
                 print(f"[WARN] Init last_seen_id: {e}")
                 self._last_seen_id = 0
 
         pending = []
+        send_thread = None
+
+        print(f"[RT] Watcher started. batch_size={self.batch_size}, poll={self.poll_interval}s, user_id={self.user_id}, ple_id={self.ple_id}")
 
         while not self._stop.is_set():
             try:
-                tmp_dir, tmp_hist = copy_history_to_temp(history_src)
-                try:
-                    new_items = fetch_new_visits_since(tmp_hist, self._last_seen_id, max(self.batch_size, 50))
-                    if new_items:
-                        self._last_seen_id = max(self._last_seen_id, max(i["visit_id"] for i in new_items))
-                        self._state["last_seen_id"] = self._last_seen_id
-                        pending.extend(new_items)
+                new_items = self._read_history_db(
+                    history_src, fetch_new_visits_since,
+                    self._last_seen_id, max(self.batch_size, 50)
+                )
+                if new_items:
+                    self._last_seen_id = max(self._last_seen_id, max(i["visit_id"] for i in new_items))
+                    self._state["last_seen_id"] = self._last_seen_id
+                    pending.extend(new_items)
+                    print(f"[RT] {len(new_items)} new visits detected. Pending: {len(pending)}/{self.batch_size}")
 
-                        if len(pending) >= self.batch_size:
-                            print(f"[DEBUG] Iniciando lote. Pendientes: {len(pending)}")
-                            batch = pending[:self.batch_size]
-                            enriched = []
-                            for it in batch:
-                                try:
-                                    enriched.append(enrich_visit(dict(it)))
-                                except Exception:
-                                    f=dict(it)
-                                    f["activityType"] = "Other"
-                                    f["associatedDomains"] = ["General Knowledge"]
-                                    f["associatedKeywords"] = []
-                                    enriched.append(f)
-                            write_batch_json(enriched, user_id=self.user_id, associated_ple=self.ple_id)
-                            print(f"[OK] JSON con {len(enriched)} items -> {OUTPUT_JSON_PATH}")
-                            _send_rt_batch_to_server(OUTPUT_JSON_PATH)
-                            print(f"[DEBUG] Lote procesado. Actualizando estado...")
-                            pending = pending[self.batch_size:]
-                            self._state["pending"] = pending
-                            try:
-                                save_state(self._state)
-                                print(f"[DEBUG] Estado guardado OK. Pendientes ahora: {len(pending)}")
-                            except Exception as e:
-                                print(f"[ERROR] ¡FALLÓ AL GUARDAR ESTADO!: {e}")
+                    if len(pending) >= self.batch_size:
+                        # Wait for previous send to finish if still running
+                        if send_thread and send_thread.is_alive():
+                            send_thread.join(timeout=60)
 
-                        else:
-                            self._state["pending"] = pending
+                        batch = pending[:self.batch_size]
+                        pending = pending[self.batch_size:]
+
+                        # Process and send in a background thread so polling continues
+                        send_thread = threading.Thread(
+                            target=self._process_and_send_batch, args=(batch,), daemon=True
+                        )
+                        send_thread.start()
+
+                        self._state["pending"] = pending
+                        try:
                             save_state(self._state)
-                finally:
-                    shutil.rmtree(tmp_dir, ignore_errors=True)
+                        except Exception as e:
+                            print(f"[ERROR] Failed to save state: {e}")
+                    else:
+                        self._state["pending"] = pending
+                        save_state(self._state)
             except Exception as e:
                 print(f"[ERROR] Iteración: {e}")
 
             self._stop.wait(self.poll_interval)
 
+        # Wait for any in-flight send to complete before stopping
+        if send_thread and send_thread.is_alive():
+            print("[RT] Waiting for in-flight batch to finish...")
+            send_thread.join(timeout=30)
+
         self._state["last_seen_id"] = self._last_seen_id
         self._state["pending"] = pending
         save_state(self._state)
+        print(f"[RT] Watcher stopped. last_seen_id={self._last_seen_id}")
 
 if __name__ == "__main__":
     watcher = RealTimeHistoryWatcher(profile_dir=PROFILE_DIR, poll_interval=POLL_INTERVAL_SECONDS, batch_size=BATCH_SIZE)
