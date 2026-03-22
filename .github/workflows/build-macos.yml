@@ -36,14 +36,17 @@ jobs:
 
       - name: Create PKG installer
         run: |
-          mkdir -p pkg_payload
-          cp -R dist/EPA_Dashboard.app pkg_payload/EPA_Dashboard.app
-          ls -la pkg_payload/
-          pkgbuild --root pkg_payload --identifier com.epai.dashboard --version 1.0.0 --install-location /Applications EPA_Dashboard_component.pkg
-          echo '<?xml version="1.0" encoding="utf-8"?><installer-gui-script minSpecVersion="2"><title>EPA Dashboard</title><options customize="never" require-scripts="false"/><domains enable_anywhere="false" enable_currentUserHome="false" enable_localSystem="true"/><choices-outline><line choice="default"><line choice="com.epai.dashboard"/></line></choices-outline><choice id="default"/><choice id="com.epai.dashboard" visible="false"><pkg-ref id="com.epai.dashboard"/></choice><pkg-ref id="com.epai.dashboard" version="1.0.0" onConclusion="none">EPA_Dashboard_component.pkg</pkg-ref></installer-gui-script>' > distribution.xml
-          productbuild --distribution distribution.xml --package-path . EPA_Dashboard.pkg
+          # Use --component to directly package the .app bundle into /Applications
+          pkgbuild \
+            --component dist/EPA_Dashboard.app \
+            --install-location /Applications \
+            --identifier com.epai.dashboard \
+            --version 1.0.0 \
+            EPA_Dashboard.pkg
           echo "PKG created:"
           ls -la EPA_Dashboard.pkg
+          echo "PKG payload files:"
+          pkgutil --payload-files EPA_Dashboard.pkg | head -5
 
       - name: Upload .app artifact
         uses: actions/upload-artifact@v4
