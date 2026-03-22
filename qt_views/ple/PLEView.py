@@ -1608,15 +1608,16 @@ class PLEView(QWidget):
 
         print("[PLEView] checkedId:", self.track_group.checkedId(), "mode:", mode)
 
-        # Guarda estado global
-        GlobalState.tracking_mode = mode
-        GlobalState.tracking_armed = (mode == "logout")
-
         env_id = self.active_ple.get("environmentID") if self.active_ple else None
         try:
             env_id_int = int(env_id)
         except (TypeError, ValueError):
             env_id_int = None
+
+        # Guarda estado global
+        GlobalState.tracking_mode = mode
+        GlobalState.tracking_armed = (mode == "logout")
+        GlobalState.last_environment_id = env_id_int
 
         frequency = 0
         if hasattr(self, "entry_opcion1"):
