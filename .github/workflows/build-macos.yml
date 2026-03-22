@@ -36,16 +36,42 @@ jobs:
 
       - name: Create PKG installer
         run: |
-          # Create payload: the .app goes directly in the root
+          # Create payload with the .app
           mkdir -p pkg_payload
           cp -R dist/EPA_Dashboard.app pkg_payload/EPA_Dashboard.app
 
-          # Build the .pkg — install-location tells macOS WHERE to place the payload
+          # Step 1: Build component package
           pkgbuild \
             --root pkg_payload \
             --identifier com.epai.dashboard \
             --version 1.0.0 \
             --install-location /Applications \
+            EPA_Dashboard_component.pkg
+
+          # Step 2: Create distribution XML for proper installer UI
+          cat > distribution.xml << 'DISTXML'
+          <?xml version="1.0" encoding="utf-8"?>
+          <installer-gui-script minSpecVersion="2">
+              <title>EPA Dashboard</title>
+              <options customize="never" require-scripts="false"/>
+              <domains enable_anywhere="false" enable_currentUserHome="false" enable_localSystem="true"/>
+              <choices-outline>
+                  <line choice="default">
+                      <line choice="com.epai.dashboard"/>
+                  </line>
+              </choices-outline>
+              <choice id="default"/>
+              <choice id="com.epai.dashboard" visible="false">
+                  <pkg-ref id="com.epai.dashboard"/>
+              </choice>
+              <pkg-ref id="com.epai.dashboard" version="1.0.0" onConclusion="none">EPA_Dashboard_component.pkg</pkg-ref>
+          </installer-gui-script>
+          DISTXML
+
+          # Step 3: Build distribution package (proper macOS installer)
+          productbuild \
+            --distribution distribution.xml \
+            --package-path . \
             EPA_Dashboard.pkg
 
       - name: Upload .app artifact
