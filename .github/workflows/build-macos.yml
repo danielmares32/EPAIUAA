@@ -34,29 +34,93 @@ jobs:
       - name: Build .app with PyInstaller
         run: pyinstaller EPA_Dashboard.spec
 
-      - name: Create DMG installer
+      - name: Create PKG installer
         run: |
-          # Create a temporary DMG layout folder
-          mkdir -p dmg_contents
-          cp -R dist/EPA_Dashboard.app dmg_contents/
+          # Clean extended attributes and resource forks
+          xattr -cr dist/EPA_Dashboard.app
+          dot_clean dist/EPA_Dashboard.app
+          find dist/EPA_Dashboard.app -name '._*' -delete
 
-          # Create a symbolic link to /Applications for drag-and-drop
-          ln -s /Applications dmg_contents/Applications
+          # Copy app to payload directory
+          mkdir -p pkg_payload
+          cp -R dist/EPA_Dashboard.app pkg_payload/
 
-          # Create the DMG
-          hdiutil create \
-            -volname "EPA Dashboard" \
-            -srcfolder dmg_contents \
-            -ov \
-            -format UDZO \
-            EPA_Dashboard.dmg
+          # Create component plist and disable bundle relocation
+          pkgbuild --analyze --root pkg_payload component.plist
+          python3 -c "
+          import plistlib
+          with open('component.plist', 'rb') as f:
+              pl = plistlib.load(f)
+          for item in pl:
+              item['BundleIsRelocatable'] = False
+          with open('component.plist', 'wb') as f:
+              plistlib.dump(pl, f)
+          "
 
-          echo "DMG created:"
-          ls -la EPA_Dashboard.dmg
+          # Create pre/post install scripts
+          mkdir -p scripts
+          cat > scripts/preinstall << 'PREEOF'
+          #!/bin/bash
+          pkill -9 -f "EPA_Dashboard" 2>/dev/null || true
+          if [ -d "/Applications/EPA_Dashboard.app" ]; then
+              rm -rf "/Applications/EPA_Dashboard.app"
+          fi
+          exit 0
+          PREEOF
+          chmod +x scripts/preinstall
 
-      - name: Upload .dmg artifact
+          cat > scripts/postinstall << 'POSTEOF'
+          #!/bin/bash
+          xattr -rd com.apple.quarantine /Applications/EPA_Dashboard.app 2>/dev/null || true
+          chmod -R 755 /Applications/EPA_Dashboard.app
+          /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f /Applications/EPA_Dashboard.app 2>/dev/null || true
+          exit 0
+          POSTEOF
+          chmod +x scripts/postinstall
+
+          # Build component package
+          pkgbuild \
+            --root pkg_payload \
+            --component-plist component.plist \
+            --identifier com.epai.dashboard \
+            --version 1.0.1 \
+            --install-location /Applications \
+            --scripts scripts \
+            EPA_Dashboard_component.pkg
+
+          # Create distribution XML
+          cat > distribution.xml << 'DISTXML'
+          <?xml version="1.0" encoding="utf-8"?>
+          <installer-gui-script minSpecVersion="2">
+              <title>EPA Dashboard</title>
+              <organization>com.epai.dashboard</organization>
+              <domains enable_localSystem="true" enable_currentUserHome="false" enable_anywhere="false"/>
+              <options customize="never" require-scripts="true" rootVolumeOnly="true" hostArchitectures="arm64,x86_64"/>
+              <choices-outline>
+                  <line choice="default">
+                      <line choice="com.epai.dashboard.pkg"/>
+                  </line>
+              </choices-outline>
+              <choice id="default"/>
+              <choice id="com.epai.dashboard.pkg" visible="false">
+                  <pkg-ref id="com.epai.dashboard"/>
+              </choice>
+              <pkg-ref id="com.epai.dashboard" version="1.0.1" onConclusion="none">EPA_Dashboard_component.pkg</pkg-ref>
+          </installer-gui-script>
+          DISTXML
+
+          # Build final distribution package
+          productbuild \
+            --distribution distribution.xml \
+            --package-path . \
+            EPA_Dashboard.pkg
+
+          echo "PKG created:"
+          ls -la EPA_Dashboard.pkg
+
+      - name: Upload .pkg artifact
         uses: actions/upload-artifact@v4
         with:
-          name: EPA_Dashboard-macos-dmg
-          path: EPA_Dashboard.dmg
+          name: EPA_Dashboard-macos-pkg
+          path: EPA_Dashboard.pkg
           retention-days: 30
