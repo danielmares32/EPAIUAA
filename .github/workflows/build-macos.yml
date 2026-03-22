@@ -36,16 +36,16 @@ jobs:
 
       - name: Create PKG installer
         run: |
-          # Create a temporary directory structure for pkgbuild
-          mkdir -p pkg_root/Applications
-          cp -R dist/EPA_Dashboard.app pkg_root/Applications/
+          # Create payload: the .app goes directly in the root
+          mkdir -p pkg_payload
+          cp -R dist/EPA_Dashboard.app pkg_payload/EPA_Dashboard.app
 
-          # Build the .pkg installer
+          # Build the .pkg — install-location tells macOS WHERE to place the payload
           pkgbuild \
-            --root pkg_root \
+            --root pkg_payload \
             --identifier com.epai.dashboard \
             --version 1.0.0 \
-            --install-location / \
+            --install-location /Applications \
             EPA_Dashboard.pkg
 
       - name: Upload .app artifact
