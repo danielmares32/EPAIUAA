@@ -874,13 +874,21 @@ class RealTimeHistoryWatcher:
         # Initialize last_seen_id: set to current max so we only track NEW visits
         if not self._last_seen_id:
             try:
-                self._last_seen_id = self._read_history_db(history_src, get_max_visit_id_on_snapshot)
+                # Read directly from Chrome DB (read-only) to get the true current max
+                self._last_seen_id = get_max_visit_id_on_snapshot(history_src)
                 self._state["last_seen_id"] = self._last_seen_id
                 save_state(self._state)
-                _logger.info(f"Initialized last_seen_id = {self._last_seen_id}")
+                _logger.info(f"Initialized last_seen_id = {self._last_seen_id} (direct read)")
             except Exception as e:
-                _logger.warning(f"Init last_seen_id: {e}", exc_info=True)
-                self._last_seen_id = 0
+                _logger.warning(f"Direct read failed ({e}), trying copy method...")
+                try:
+                    self._last_seen_id = self._read_history_db(history_src, get_max_visit_id_on_snapshot)
+                    self._state["last_seen_id"] = self._last_seen_id
+                    save_state(self._state)
+                    _logger.info(f"Initialized last_seen_id = {self._last_seen_id} (copy method)")
+                except Exception as e2:
+                    _logger.error(f"Could not initialize last_seen_id: {e2}. Aborting watcher.")
+                    return
 
         pending = []
         send_thread = None
