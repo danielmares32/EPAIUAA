@@ -1653,12 +1653,29 @@ class PLEView(QWidget):
             if not prof:
                 QMessageBox.warning(self, "Perfil", "No hay perfil de Chrome seleccionado.")
                 return
-            started = self._start_realtime_tracker(profile_dir=prof, batch_size=frequency if frequency>0 else None)
-            if started:
-                msg = f"Seguimiento en tiempo real ACTIVADO\nPerfil: {prof}"
-                if frequency and frequency > 0:
-                    msg += f"\nFrecuencia/Lote: {frequency}"
-                QMessageBox.information(self, "Seguimiento", msg)
+
+            # Use the same sending path as option 3 (logout) via history_service_4
+            from qt_views.DashboardWindow import HistoryWorker
+
+            env_id_val = self.active_ple.get("environmentID") if self.active_ple else None
+            if env_id_val is not None:
+                os.environ["EPA_SELECTED_ENV_ID"] = str(env_id_val)
+
+            self._hist_worker = HistoryWorker(
+                profile_dir=prof,
+                output_dir="chrome_exports/teacher"
+            )
+            self._hist_worker.done.connect(lambda: QMessageBox.information(
+                self, "Seguimiento",
+                f"Datos enviados correctamente al servidor.\nPerfil: {prof}"
+            ))
+            self._hist_worker.fail.connect(lambda err: QMessageBox.critical(
+                self, "Error de envío",
+                f"Error al enviar datos:\n{err}"
+            ))
+            self._hist_worker.start()
+            QMessageBox.information(self, "Seguimiento",
+                f"Enviando datos del historial de Chrome...\nPerfil: {prof}")
             return
 
         self._stop_realtime_tracker()
